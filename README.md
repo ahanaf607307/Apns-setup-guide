@@ -79,3 +79,56 @@ If updates aren't working, here is what is happening under the hood:
 2.  **Backend** uses the `.p8` key and `Key ID` to sign a request to Apple.
 3.  **Apple (APNs)** sends a silent ping to the user's iPhone.
 4.  **iPhone** wakes up and calls your URL: `/api/customer/apple-wallet-wws/v1/devices/...` to get the new points.
+
+---
+
+## 💻 6. Implementation Code (Snippets)
+
+### A. The APNs Service Wrapper
+This is how we initialize the connection to Apple in `src/app/utils/apns.service.js`:
+
+```javascript
+import apn from "@parse/node-apn";
+import { envVars } from "../config/env.js";
+
+const provider = new apn.Provider({
+    token: {
+        key: "./AuthKey_XXXXXX.p8", // Path to your key
+        keyId: "ABC123DEFG",         // Your Key ID
+        teamId: "XYZ7890123",        // Your Team ID
+    },
+    production: process.env.NODE_ENV === "production",
+});
+
+export const sendPassUpdate = async (pushToken) => {
+    const notification = new apn.Notification();
+    notification.payload = {}; // Empty payload for wallet
+    notification.topic = "pass.com.belbeda.loyalty"; // Your Pass Type ID
+    
+    return await provider.send(notification, pushToken);
+};
+```
+
+### B. Triggering the Update
+When a user's points change, we call the push service:
+
+```javascript
+// Inside your Point Update Service
+import { sendPassUpdate } from "./utils/apns.service.js";
+
+const handlePointChange = async (customerId, points) => {
+    // 1. Update database points
+    await db.rewardHistory.update(...);
+
+    // 2. Find all registered devices for this customer
+    const registrations = await db.appleRegistration.findMany({
+        where: { customerId },
+        include: { device: true }
+    });
+
+    // 3. Send the "Poke" to each device
+    for (const reg of registrations) {
+        await sendPassUpdate(reg.device.pushToken);
+    }
+};
+```
